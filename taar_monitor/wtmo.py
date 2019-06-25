@@ -3,14 +3,19 @@ import requests
 import time
 from pprint import pprint
 from decouple import config
+from pyspark.sql.types import *
 
 import dateutil.parser
 
-STMO_API_KEY = config('STMO_API_KEY')
+STMO_API_KEY = config("STMO_API_KEY")
+
 
 class WorkflowTaskInfo:
     QUERY_ID = 63309
     API_KEY = STMO_API_KEY
+
+    def __init__(self, spark):
+        self._spark = spark
 
     def poll_job(self, s, redash_url, job):
         # TODO: add timeout
@@ -24,25 +29,26 @@ class WorkflowTaskInfo:
 
         return None
 
-
     def get_fresh_query_result(self, redash_url, query_id, api_key, params):
         s = requests.Session()
         s.headers.update({"Authorization": "Key {}".format(api_key)})
 
         url = "{}/api/queries/{}/refresh".format(redash_url, query_id)
-        #print("Hitting url: [{}]".format(url))
+        # print("Hitting url: [{}]".format(url))
         response = s.post(url, params=params)
 
         if response.status_code != 200:
-            #print(response.text)
-            #print(response.status_code)
+            # print(response.text)
+            # print(response.status_code)
             raise Exception("Refresh failed.")
 
         result_id = self.poll_job(s, redash_url, response.json()["job"])
 
         if result_id:
             response = s.get(
-                "{}/api/queries/{}/results/{}.json".format(redash_url, query_id, result_id)
+                "{}/api/queries/{}/results/{}.json".format(
+                    redash_url, query_id, result_id
+                )
             )
             if response.status_code != 200:
                 raise Exception("Failed getting results.")
@@ -51,10 +57,9 @@ class WorkflowTaskInfo:
 
         return response.json()["query_result"]["data"]["rows"]
 
-
     def build_params(self, **param_dict):
         tmp = dict([("p_{}".format(k), v) for k, v in param_dict.items()])
-        #print("Got params: {}".format(tmp))
+        # print("Got params: {}".format(tmp))
         return tmp
 
     def _get_runtime(self, **kwargs):
@@ -91,7 +96,7 @@ class WorkflowTaskInfo:
         )
         return data
 
-    def get_etl_durations(self, dag_id, task_id, batch_size, extra_where=''):
+    def get_etl_durations(self, dag_id, task_id, batch_size, extra_where=""):
         """
         Fetch a list of durations in seconds for a particular job.
 
@@ -102,12 +107,20 @@ class WorkflowTaskInfo:
             task_id=task_id,
             batch_size=batch_size,
             extra_where=extra_where,
-            )
+        )
         tuples = []
         for r in data:
-            if r['state'] == 'success':
-                tuples.append((r['start_date'], r['duration']))
+            if r["state"] == "success":
+                tuples.append((r["start_date"], r["duration"]))
             else:
-                tuples.append((r['start_date'], 0))
-        parsed_tuples = [(dateutil.parser.parse(r[0]),r[1]) for r in tuples]
-        return parsed_tuples
+                tuples.append((r["start_date"], 0))
+        parsed_tuples = [
+            (int(dateutil.parser.parse(r[0]).timestamp()), r[1]) for r in tuples
+        ]
+
+        cSchema = StructType(
+            [StructField("timestamp", LongType()), StructField("duration", FloatType())]
+        )
+
+        df = self._spark.createDataFrame(parsed_tuples, schema=cSchema)
+        return df

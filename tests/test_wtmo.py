@@ -31,7 +31,7 @@ def mocked__get_runtime(*args, **kwargs):
     ]
 
 
-def test_workflowtaskinfo():
+def test_workflowtaskinfo(spark):
     """
     Test that the workflow data extraction class works properly
 
@@ -42,7 +42,7 @@ def test_workflowtaskinfo():
 
     job = ("taar_weekly", "taar_ensemble")
 
-    wtmo_data = wtmo.WorkflowTaskInfo()
+    wtmo_data = wtmo.WorkflowTaskInfo(spark)
     with patch.object(wtmo_data, "_get_runtime", new=mocked__get_runtime):
         dag_id, task_id = job
         runtime_meta = wtmo_data.get_etl_durations(
@@ -50,11 +50,11 @@ def test_workflowtaskinfo():
             task_id=task_id,
             batch_size=7,
             extra_where=" and start_date >= '2019-06-10'",
-        )
+        ).collect()
 
         assert len(runtime_meta) == 3
         assert runtime_meta == [
-            (datetime(2019, 6, 16, 0, 0, 32, 558000), 1216.64),
-            (datetime(2019, 6, 17, 0, 0, 32, 558000), 1220.64),
-            (datetime(2019, 6, 18, 0, 0, 32, 558000), 1230.64),
+            (1560657632, 1216.6400146484375),
+            (1560744032, 1220.6400146484375),
+            (1560830432, 1230.6400146484375),
         ]
