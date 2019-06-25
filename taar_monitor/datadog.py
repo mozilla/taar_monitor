@@ -3,13 +3,14 @@ from datadog import api, initialize
 from datetime import datetime
 from pprint import pprint
 from decouple import config
+from pyspark.sql.types import *
 
 DATADOG_API_KEY = config("DATADOG_API_KEY")
 DATADOG_APP_KEY = config("DATADOG_APP_KEY")
 
 
 def parse_ts(ts):
-    return datetime.fromtimestamp(ts / 1000.0)
+    return int(ts / 1000)
 
 
 class DatadogQueryType:
@@ -20,8 +21,9 @@ class DatadogQueryType:
 class DataDogSource:
     OPTIONS = {"api_key": DATADOG_API_KEY, "app_key": DATADOG_APP_KEY}
 
-    def __init__(self):
+    def __init__(self, spark):
         initialize(**self.OPTIONS)
+        self._spark = spark
 
     def get_total_http200_served(self, minutes=24 * 60):
         """
@@ -43,6 +45,9 @@ class DataDogSource:
         return 0
 
     def get_dynamodb_read_latency(self, minutes=20):
+        """
+        Return a list of 2-tuples of (timestamps, latency in ms)
+        """
         cmd = "max"
         metric = "aws.dynamodb.successful_request_latency"
         tags = "{app:data,env:prod,stack:taar}"
@@ -51,7 +56,12 @@ class DataDogSource:
         if data["status"] == "ok":
             for (ts, scalar) in data["series"][0]["pointlist"]:
                 result.append((parse_ts(ts), scalar))
-        return result
+
+        cSchema = StructType([StructField("timestamp", LongType())\
+                              ,StructField("latency", FloatType())])
+
+        df = self._spark.createDataFrame(result,schema=cSchema)
+        return df
 
     def get_python_backend_latency(self, minutes=20):
         cmd = "max"
@@ -62,7 +72,12 @@ class DataDogSource:
         if data["status"] == "ok":
             for (ts, scalar) in data["series"][0]["pointlist"]:
                 result.append((parse_ts(ts), scalar))
-        return result
+
+        cSchema = StructType([StructField("timestamp", LongType())\
+                              ,StructField("latency", FloatType())])
+
+        df = self._spark.createDataFrame(result,schema=cSchema)
+        return df
 
     def get_dashboard(self, dash_id):
         return api.Dashboard.get(dash_id)

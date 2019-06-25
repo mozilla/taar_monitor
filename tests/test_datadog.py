@@ -7,14 +7,10 @@ from datetime import date, datetime
 from taar_monitor import datadog
 
 
-def test_dynamo_read_latency():
-    dd = datadog.DataDogSource()
+def test_dynamo_read_latency(spark):
+    dd = datadog.DataDogSource(spark)
 
-    EXPECTED = [
-        (datetime(2019, 6, 24, 17, 13, 18, 740208), 1.0),
-        (datetime(2019, 6, 25, 20, 59, 58, 740208), 1.5),
-        (datetime(2019, 6, 27, 0, 46, 38, 740208), 2.0),
-    ]
+    EXPECTED = [(1561410798, 1.0), (1561510898, 1.5), (1561610998, 2.0)]
 
     def mocked_process_query(*args, **kwargs):
         return {
@@ -22,9 +18,9 @@ def test_dynamo_read_latency():
             "series": [
                 {
                     "pointlist": [
-                        (1561410798.740208 * 1000, 1.0),
-                        (1561510798.740208 * 1000, 1.5),
-                        (1561610798.740208 * 1000, 2.0),
+                        (1561410798.140208 * 1000, 1.0),
+                        (1561510898.140208 * 1000, 1.5),
+                        (1561610998.140208 * 1000, 2.0),
                     ]
                 }
             ],
@@ -32,17 +28,13 @@ def test_dynamo_read_latency():
 
     with patch.object(dd, "_process_query", new=mocked_process_query):
         results = dd.get_dynamodb_read_latency(24 * 60)
-        assert results == EXPECTED
+        assert results.collect() == EXPECTED
 
 
-def test_python_backend_latency():
-    dd = datadog.DataDogSource()
+def test_python_backend_latency(spark):
+    dd = datadog.DataDogSource(spark)
 
-    EXPECTED = [
-        (datetime(2019, 6, 24, 17, 13, 18, 740208), 1.0),
-        (datetime(2019, 6, 25, 20, 59, 58, 740208), 1.5),
-        (datetime(2019, 6, 27, 0, 46, 38, 740208), 2.0),
-    ]
+    EXPECTED = [(1561410798, 1.0), (1561510898, 1.5), (1561610998, 2.0)]
 
     def mocked_process_query(*args, **kwargs):
         return {
@@ -50,22 +42,21 @@ def test_python_backend_latency():
             "series": [
                 {
                     "pointlist": [
-                        (1561410798.740208 * 1000, 1.0),
-                        (1561510798.740208 * 1000, 1.5),
-                        (1561610798.740208 * 1000, 2.0),
+                        (1561410798 * 1000, 1.0),
+                        (1561510898 * 1000, 1.5),
+                        (1561610998 * 1000, 2.0),
                     ]
                 }
             ],
         }
 
-
     with patch.object(dd, "_process_query", new=mocked_process_query):
         results = dd.get_python_backend_latency(24 * 60)
-        assert results == EXPECTED
+        assert results.collect() == EXPECTED
 
 
-def test_total_http200_served():
-    dd = datadog.DataDogSource()
+def test_total_http200_served(spark):
+    dd = datadog.DataDogSource(spark)
 
     EXPECTED = 342
 
@@ -83,7 +74,6 @@ def test_total_http200_served():
                 }
             ],
         }
-
 
     with patch.object(dd, "_process_query", new=mocked_process_query):
         assert EXPECTED == dd.get_total_http200_served(minutes=24 * 60)
