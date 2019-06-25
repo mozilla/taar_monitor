@@ -38,9 +38,7 @@ class DataDogSource:
             query=DatadogQueryType.QUERY_VALUE,
             as_count=True,
         )
-        result = {}
         if data["status"] == "ok":
-            result["points"] = []
             return sum([scalar for (ts, scalar) in data["series"][0]["pointlist"]])
         return 0
 
@@ -60,11 +58,10 @@ class DataDogSource:
         metric = "aws.elb.httpcode_backend_2xx"
         tags = "{app:data,env:prod,stack:taar}"
         data = self._process_query(cmd, metric, tags, minutes)
-        result = {}
+        result = []
         if data["status"] == "ok":
-            result["points"] = []
             for (ts, scalar) in data["series"][0]["pointlist"]:
-                result["points"].append((parse_ts(ts), scalar))
+                result.append((parse_ts(ts), scalar))
         return result
 
     def get_dashboard(self, dash_id):
