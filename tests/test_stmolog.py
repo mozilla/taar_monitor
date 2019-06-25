@@ -25,23 +25,23 @@ def mocked_query_redash(*args, **kwargs):
 
 
 EXPECTED = [
-    ("1", "guid1", datetime.datetime(2019, 6, 16, 0, 0, 32, 558000)),
-    ("1", "guid2", datetime.datetime(2019, 6, 16, 0, 0, 32, 558000)),
-    ("1", "guid3", datetime.datetime(2019, 6, 16, 0, 0, 32, 558000)),
-    ("1", "guid4", datetime.datetime(2019, 6, 16, 0, 0, 32, 558000)),
-    ("2", "guid1a", datetime.datetime(2019, 6, 17, 0, 0, 32, 558000)),
-    ("2", "guid2", datetime.datetime(2019, 6, 17, 0, 0, 32, 558000)),
-    ("2", "guid3", datetime.datetime(2019, 6, 17, 0, 0, 32, 558000)),
-    ("2", "guid4", datetime.datetime(2019, 6, 17, 0, 0, 32, 558000)),
-    ("3", "guid1c", datetime.datetime(2019, 6, 18, 0, 0, 32, 558000)),
-    ("3", "guid2", datetime.datetime(2019, 6, 18, 0, 0, 32, 558000)),
-    ("3", "guid3", datetime.datetime(2019, 6, 18, 0, 0, 32, 558000)),
-    ("3", "guid4", datetime.datetime(2019, 6, 18, 0, 0, 32, 558000)),
+    ("1", "guid1", 1560657632),
+    ("1", "guid2", 1560657632),
+    ("1", "guid3", 1560657632),
+    ("1", "guid4", 1560657632),
+    ("2", "guid1a", 1560744032),
+    ("2", "guid2", 1560744032),
+    ("2", "guid3", 1560744032),
+    ("2", "guid4", 1560744032),
+    ("3", "guid1c", 1560830432),
+    ("3", "guid2", 1560830432),
+    ("3", "guid3", 1560830432),
+    ("3", "guid4", 1560830432),
 ]
 
 
-def test_stmolog():
-    ed = stmolog.EnsembleSuggestionData()
+def test_stmolog(spark):
+    ed = stmolog.EnsembleSuggestionData(spark)
     with patch.object(ed, "_query_redash", new=mocked_query_redash):
-        data = ed.get_raw_data(date(2019, 6, 11))
-        assert list(data) == EXPECTED
+        data = ed.get_suggestion_df(date(2019, 6, 11)).collect()
+        assert data == EXPECTED

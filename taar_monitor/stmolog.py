@@ -6,6 +6,7 @@ sql.telemetry.mozilla.org from the TAAR production logs
 import os
 import requests
 import time
+from pyspark.sql.types import *
 
 import dateutil.parser
 import math
@@ -17,7 +18,8 @@ from decouple import config
 from pprint import pprint
 
 
-STMO_API_KEY = config('STMO_API_KEY')
+STMO_API_KEY = config("STMO_API_KEY")
+
 
 def build_params(**param_dict):
     tmp = dict([("p_{}".format(k), v) for k, v in param_dict.items()])
@@ -39,6 +41,9 @@ def get_addon_default_name(guid):
 
 
 class AbstractData:
+    def __init__(self, spark):
+        self._spark = spark
+
     def poll_job(self, s, redash_url, job):
         while job["status"] not in (3, 4):
             uri = "{}/api/jobs/{}".format(redash_url, job["id"])
@@ -104,7 +109,21 @@ class AbstractData:
 class EnsembleSuggestionData(AbstractData):
     QUERY_ID = 63202
 
-    def get_raw_data(self, tbl_date):
+    def __init__(self, spark):
+        super().__init__(spark)
+
+    def get_suggestion_df(self, tbl_date):
+        row_iter = self._get_raw_data(tbl_date)
+
+        cSchema = StructType([
+            StructField("client", StringType()),
+            StructField("guid", StringType()),
+            StructField("timestamp", LongType())])
+
+        df = self._spark.createDataFrame(row_iter,schema=cSchema)
+        return df
+
+    def _get_raw_data(self, tbl_date):
         """
         Yield 3-tuples of (sha256 hashed client_id, guid, timestamp)
         """
@@ -115,7 +134,7 @@ class EnsembleSuggestionData(AbstractData):
         results = self._query_redash(tbl_date)
 
         for row in results:
-            ts = dateutil.parser.parse(row["TIMESTAMP"])
+            ts = int(dateutil.parser.parse(row["TIMESTAMP"]).timestamp())
             payload = row["msg"]
             weights = json.loads(weights_re.findall(payload)[0].replace("'", '"'))
             guids = json.loads(guids_re.findall(payload)[0].replace("'", '"'))
