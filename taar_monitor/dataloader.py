@@ -120,20 +120,10 @@ def update_collaborative_suggestions(spark, num_days=30):
         path = "taar-metrics/collaborative"
         filename = thedate.strftime("%Y%m%d.csv")
         if not s3_file_exists(DEFAULT_BUCKET, path, filename):
-
-            df = collab_gen.get_suggestion_df(thedate)
-            rows = df.collect()
+            rows = collab_gen.get_suggestion_df(thedate)
             fout = StringIO()
             writer = csv.writer(fout)
-            for r in rows:
-                for guid in r["guids"]:
-                    writer.writerow(
-                        (
-                            r["client_id"],
-                            guid,
-                            date.fromtimestamp(r["timestamp"]).strftime("%Y-%m-%d"),
-                        )
-                    )
+            writer.writerows(rows)
             fout.seek(0)
             data = fout.getvalue().encode("utf8")
 

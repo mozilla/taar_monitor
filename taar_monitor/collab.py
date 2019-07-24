@@ -6,6 +6,7 @@ sql.telemetry.mozilla.org from the TAAR production logs
 from pyspark.sql.types import LongType, StringType, StructField, StructType
 import dateutil.parser
 import json
+import ast
 import re
 import requests
 
@@ -35,6 +36,9 @@ class CollaborativeSuggestionData(AbstractData):
     def get_suggestion_df(self, tbl_date):
         row_iter = self._get_raw_data(tbl_date)
 
+        return list(row_iter)
+
+        """
         cSchema = StructType(
             [
                 StructField("client", StringType()),
@@ -43,14 +47,15 @@ class CollaborativeSuggestionData(AbstractData):
             ]
         )
 
-        df = self._spark.createDataFrame(row_iter, schema=cSchema)
+        df = self._spark.createDataFrame(list(row_iter), schema=cSchema)
         return df
+        """
 
     def _get_raw_data(self, tbl_date):
         """
         Yield 3-tuples of (sha256 hashed client_id, guid, timestamp)
         """
-        guids_re = re.compile(r"guids *: *(\[[^]]*\])")
+        guids_re = re.compile(r"guids *: *\[(\[[^]]*\])")
         client_re = re.compile(r"client_id *: *\[([^]]*)\]")
 
         results = self._query_redash(tbl_date)
@@ -58,7 +63,13 @@ class CollaborativeSuggestionData(AbstractData):
         for row in results:
             ts = int(dateutil.parser.parse(row["TIMESTAMP"]).timestamp())
             payload = row["msg"]
-            guids = json.loads(guids_re.findall(payload)[0].replace("'", '"'))
+            guids_json = guids_re.findall(payload)[0]
+            try:
+                guids = ast.literal_eval(guids_json)
+            except Exception:
+                print("Error parsing GUIDS out of : {}".format(guids_json))
+                continue
+
             client_id = client_re.findall(payload)[0]
             for guid in guids:
                 parsed_data = (client_id, guid, ts)
