@@ -1,9 +1,8 @@
 import time
 from datadog import api, initialize
-from datetime import datetime
-from pprint import pprint
 from decouple import config
-from pyspark.sql.types import *
+from pyspark.sql.types import LongType, StructField, StructType, FloatType
+
 
 DATADOG_API_KEY = config("DATADOG_API_KEY")
 DATADOG_APP_KEY = config("DATADOG_APP_KEY")
@@ -57,26 +56,11 @@ class DataDogSource:
             for (ts, scalar) in data["series"][0]["pointlist"]:
                 result.append((parse_ts(ts), scalar))
 
-        cSchema = StructType([StructField("timestamp", LongType())\
-                              ,StructField("latency", FloatType())])
+        cSchema = StructType(
+            [StructField("timestamp", LongType()), StructField("latency", FloatType())]
+        )
 
-        df = self._spark.createDataFrame(result,schema=cSchema)
-        return df
-
-    def get_python_backend_latency(self, minutes=20):
-        cmd = "max"
-        metric = "aws.elb.httpcode_backend_2xx"
-        tags = "{app:data,env:prod,stack:taar}"
-        data = self._process_query(cmd, metric, tags, minutes)
-        result = []
-        if data["status"] == "ok":
-            for (ts, scalar) in data["series"][0]["pointlist"]:
-                result.append((parse_ts(ts), scalar))
-
-        cSchema = StructType([StructField("timestamp", LongType())\
-                              ,StructField("latency", FloatType())])
-
-        df = self._spark.createDataFrame(result,schema=cSchema)
+        df = self._spark.createDataFrame(result, schema=cSchema)
         return df
 
     def get_dashboard(self, dash_id):
