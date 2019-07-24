@@ -1,6 +1,8 @@
 from .utils import check_py3
-from .locale import LocaleSuggestionData
 from .amo_installs import AddonInstallEvents
+
+from .locale import LocaleSuggestionData
+from .collab import CollaborativeSuggestionData
 
 
 from datetime import date, timedelta
@@ -67,6 +69,71 @@ def update_locale(spark, num_days=30):
             fout = StringIO()
             writer = csv.writer(fout)
             writer.writerows([locale_to_csv_row(r) for r in rows])
+            fout.seek(0)
+            data = fout.getvalue().encode("utf8")
+
+            _store_to_s3(data, DEFAULT_BUCKET, path, filename)
+
+
+def update_ensemble_suggestions(spark, num_days=30):
+    # TODO:
+    def locale_to_csv_row(r):
+        return (
+            r["locale"],
+            r["guid"],
+            date.fromtimestamp(r["timestamp"]).strftime("%Y-%m-%d"),
+        )
+
+    ll = LocaleSuggestionData(spark)
+    today = date.today()
+
+    for i in range(num_days):
+        thedate = today - timedelta(days=(i + 1))
+        path = "taar-metrics/ensemble"
+        filename = thedate.strftime("%Y%m%d.csv")
+        if not s3_file_exists(DEFAULT_BUCKET, path, filename):
+
+            df = ll.get_suggestion_df(thedate)
+            rows = df.collect()
+            fout = StringIO()
+            writer = csv.writer(fout)
+            writer.writerows([locale_to_csv_row(r) for r in rows])
+            fout.seek(0)
+            data = fout.getvalue().encode("utf8")
+
+            _store_to_s3(data, DEFAULT_BUCKET, path, filename)
+
+
+def update_collaborative_suggestions(spark, num_days=30):
+    def locale_to_csv_row(r):
+        return (
+            r["client_id"],
+            r["guid"],
+            date.fromtimestamp(r["timestamp"]).strftime("%Y-%m-%d"),
+        )
+
+    collab_gen = CollaborativeSuggestionData(spark)
+    today = date.today()
+
+    for i in range(num_days):
+        thedate = today - timedelta(days=(i + 1))
+        path = "taar-metrics/collaborative"
+        filename = thedate.strftime("%Y%m%d.csv")
+        if not s3_file_exists(DEFAULT_BUCKET, path, filename):
+
+            df = collab_gen.get_suggestion_df(thedate)
+            rows = df.collect()
+            fout = StringIO()
+            writer = csv.writer(fout)
+            for r in rows:
+                for guid in r["guids"]:
+                    writer.writerow(
+                        (
+                            r["client_id"],
+                            guid,
+                            date.fromtimestamp(r["timestamp"]).strftime("%Y-%m-%d"),
+                        )
+                    )
             fout.seek(0)
             data = fout.getvalue().encode("utf8")
 
