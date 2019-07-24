@@ -1,4 +1,4 @@
-from .stmolog import AbstractData
+from .redash_base import AbstractData
 
 from py4j.protocol import Py4JJavaError
 from pyspark.sql.types import LongType, StringType, StructField, StructType
