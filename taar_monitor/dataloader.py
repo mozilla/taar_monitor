@@ -3,6 +3,7 @@ from .amo_installs import AddonInstallEvents
 
 from .locale import LocaleSuggestionData
 from .collab import CollaborativeSuggestionData
+from .ensemble import EnsembleSuggestionData
 
 
 from datetime import date, timedelta
@@ -76,15 +77,7 @@ def update_locale(spark, num_days=30):
 
 
 def update_ensemble_suggestions(spark, num_days=30):
-    # TODO:
-    def locale_to_csv_row(r):
-        return (
-            r["locale"],
-            r["guid"],
-            date.fromtimestamp(r["timestamp"]).strftime("%Y-%m-%d"),
-        )
-
-    ll = LocaleSuggestionData(spark)
+    ensemble_gen = EnsembleSuggestionData(spark)
     today = date.today()
 
     for i in range(num_days):
@@ -92,12 +85,10 @@ def update_ensemble_suggestions(spark, num_days=30):
         path = "taar-metrics/ensemble"
         filename = thedate.strftime("%Y%m%d.csv")
         if not s3_file_exists(DEFAULT_BUCKET, path, filename):
-
-            df = ll.get_suggestion_df(thedate)
-            rows = df.collect()
+            rows = ensemble_gen.get_suggestions(thedate)
             fout = StringIO()
             writer = csv.writer(fout)
-            writer.writerows([locale_to_csv_row(r) for r in rows])
+            writer.writerows(rows)
             fout.seek(0)
             data = fout.getvalue().encode("utf8")
 

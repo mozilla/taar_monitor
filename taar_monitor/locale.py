@@ -1,6 +1,6 @@
 from .redash_base import AbstractData
+from .utils import safe_createDataFrame
 
-from py4j.protocol import Py4JJavaError
 from pyspark.sql.types import LongType, StringType, StructField, StructType
 import ast
 import dateutil.parser
@@ -14,25 +14,6 @@ def parse_ts(ts):
 
 def date_to_ts(dt):
     return int((time.mktime(dateutil.parser.parse(dt).timetuple())))
-
-
-class ClusterRebootRequired(Exception):
-    pass
-
-
-def safe_createDataFrame(spark, pydata, schema):
-    """ This wraps the spark.createDataFrame function to clarify that
-    the cluster needs a reboot if an exception is encountered.
-  """
-    try:
-        df = spark.createDataFrame(pydata, schema=schema)
-    except Py4JJavaError as py4j_exc:
-        raise ClusterRebootRequired(
-            "A Spark error was encountered which seems to indicate the cluster needs a restart.",
-            py4j_exc,
-        )
-
-    return df
 
 
 class LocaleSuggestionData(AbstractData):
