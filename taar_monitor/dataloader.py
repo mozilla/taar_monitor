@@ -19,6 +19,11 @@ check_py3()
 
 DEFAULT_BUCKET = "srg-team-bucket"
 
+INSTALL_EVENTS_PATH = "taar-metrics/install_events"
+LOCALE_PATH = "taar-metrics/locale"
+ENSEMBLE_PATH = "taar-metrics/ensemble"
+COLLABORATIVE_PATH = "taar-metrics/collaborative"
+
 
 def update_install_events(spark, num_days=30, end_date=None):
 
@@ -27,8 +32,6 @@ def update_install_events(spark, num_days=30, end_date=None):
         today = date.today()
     else:
         today = end_date
-
-    path = "taar-metrics/install_events"
 
     def convert_to_csv(row):
         return (row["submission_date"], row["client_id"], row["value"])
@@ -43,14 +46,14 @@ def update_install_events(spark, num_days=30, end_date=None):
     for i in range(num_days):
         thedate = today - timedelta(days=(i + 1))
         filename = thedate.strftime("%Y%m%d.csv")
-        if not s3_file_exists(DEFAULT_BUCKET, path, filename):
+        if not s3_file_exists(DEFAULT_BUCKET, INSTALL_EVENTS_PATH, filename):
             rows = event_gen.get_install_events(thedate)
             fout = StringIO()
             writer = csv.writer(fout)
             writer.writerows([convert_to_csv(r) for r in rows])
             fout.seek(0)
             data = fout.getvalue().encode("utf8")
-            _store_to_s3(data, DEFAULT_BUCKET, path, filename)
+            _store_to_s3(data, DEFAULT_BUCKET, INSTALL_EVENTS_PATH, filename)
 
 
 def update_locale(spark, num_days=30):
@@ -66,9 +69,8 @@ def update_locale(spark, num_days=30):
 
     for i in range(num_days):
         thedate = today - timedelta(days=(i + 1))
-        path = "taar-metrics/locale"
         filename = thedate.strftime("%Y%m%d.csv")
-        if not s3_file_exists(DEFAULT_BUCKET, path, filename):
+        if not s3_file_exists(DEFAULT_BUCKET, LOCALE_PATH, filename):
 
             df = ll.get_suggestion_df(thedate)
             rows = df.collect()
@@ -78,7 +80,7 @@ def update_locale(spark, num_days=30):
             fout.seek(0)
             data = fout.getvalue().encode("utf8")
 
-            _store_to_s3(data, DEFAULT_BUCKET, path, filename)
+            _store_to_s3(data, DEFAULT_BUCKET, LOCALE_PATH, filename)
 
 
 def update_ensemble_suggestions(spark, num_days=30, end_date=None):
@@ -90,16 +92,15 @@ def update_ensemble_suggestions(spark, num_days=30, end_date=None):
 
     for i in range(num_days):
         thedate = today - timedelta(days=(i + 1))
-        path = "taar-metrics/ensemble"
         filename = thedate.strftime("%Y%m%d.csv")
-        if not s3_file_exists(DEFAULT_BUCKET, path, filename):
+        if not s3_file_exists(DEFAULT_BUCKET, ENSEMBLE_PATH, filename):
             rows = ensemble_gen.get_suggestions(thedate)
             fout = StringIO()
             writer = csv.writer(fout)
             writer.writerows(rows)
             fout.seek(0)
             data = fout.getvalue().encode("utf8")
-            _store_to_s3(data, DEFAULT_BUCKET, path, filename)
+            _store_to_s3(data, DEFAULT_BUCKET, ENSEMBLE_PATH, filename)
 
 
 def update_collaborative_suggestions(spark, num_days=30):
@@ -115,9 +116,8 @@ def update_collaborative_suggestions(spark, num_days=30):
 
     for i in range(num_days):
         thedate = today - timedelta(days=(i + 1))
-        path = "taar-metrics/collaborative"
         filename = thedate.strftime("%Y%m%d.csv")
-        if not s3_file_exists(DEFAULT_BUCKET, path, filename):
+        if not s3_file_exists(DEFAULT_BUCKET, COLLABORATIVE_PATH, filename):
             rows = collab_gen.get_suggestion_df(thedate)
             fout = StringIO()
             writer = csv.writer(fout)
@@ -125,7 +125,7 @@ def update_collaborative_suggestions(spark, num_days=30):
             fout.seek(0)
             data = fout.getvalue().encode("utf8")
 
-            _store_to_s3(data, DEFAULT_BUCKET, path, filename)
+            _store_to_s3(data, DEFAULT_BUCKET, COLLABORATIVE_PATH, filename)
 
 
 def s3_normpath(path, filename):
