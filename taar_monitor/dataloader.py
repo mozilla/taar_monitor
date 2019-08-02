@@ -20,9 +20,18 @@ check_py3()
 DEFAULT_BUCKET = "srg-team-bucket"
 
 
-def update_install_events(spark, num_days=30):
+def update_install_events(spark, num_days=30, end_date=None):
+
+    event_gen = AddonInstallEvents(spark)
+    if end_date is None:
+        today = date.today()
+    else:
+        today = end_date
+
+    path = "taar-metrics/install_events"
+
     def convert_to_csv(row):
-        yield (row["submission_date"], row["client_id"], row["value"])
+        return (row["submission_date"], row["client_id"], row["value"])
 
     def locale_to_csv_row(r):
         return (
@@ -30,10 +39,6 @@ def update_install_events(spark, num_days=30):
             r["guid"],
             date.fromtimestamp(r["timestamp"]).strftime("%Y-%m-%d"),
         )
-
-    event_gen = AddonInstallEvents(spark)
-    today = date.today()
-    path = "taar-metrics/install_events"
 
     for i in range(num_days):
         thedate = today - timedelta(days=(i + 1))
@@ -76,9 +81,12 @@ def update_locale(spark, num_days=30):
             _store_to_s3(data, DEFAULT_BUCKET, path, filename)
 
 
-def update_ensemble_suggestions(spark, num_days=30):
+def update_ensemble_suggestions(spark, num_days=30, end_date=None):
     ensemble_gen = EnsembleSuggestionData(spark)
-    today = date.today()
+    if end_date is None:
+        today = date.today()
+    else:
+        today = end_date
 
     for i in range(num_days):
         thedate = today - timedelta(days=(i + 1))
@@ -91,7 +99,6 @@ def update_ensemble_suggestions(spark, num_days=30):
             writer.writerows(rows)
             fout.seek(0)
             data = fout.getvalue().encode("utf8")
-
             _store_to_s3(data, DEFAULT_BUCKET, path, filename)
 
 
