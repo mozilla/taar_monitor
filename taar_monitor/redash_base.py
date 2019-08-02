@@ -63,19 +63,26 @@ class AbstractData:
         iso_date = tbl_date.strftime("%Y%m%d")
         tbl = "taar_prod_logs.docker_taar_api_{}".format(iso_date)
         data = []
-        ts = """ AND timestamp >= '{} {:01d}:00:00' AND timestamp < '{} {:01d}:59:59'"""
+
+        ts_list = [
+            """ AND timestamp >= '{} {:01d}:00:00' AND timestamp < '{} {:01d}:29:59'""",
+            """ AND timestamp >= '{} {:01d}:30:00' AND timestamp < '{} {:01d}:59:59'""",
+        ]
         for splice_hour in range(24):
             iso_date_hyphens = tbl_date.strftime("%Y-%m-%d")
-            params = build_params(
-                table_name=tbl,
-                time_slice=ts.format(
-                    iso_date_hyphens, splice_hour, iso_date_hyphens, splice_hour
-                ),
-            )
-
-            # Need to use a *user API key* here (and not a query API key).
-            tmp_data = self.get_fresh_query_result(
-                "https://sql.telemetry.mozilla.org", self.QUERY_ID, STMO_API_KEY, params
-            )
-            data.extend(tmp_data)
+            for ts in ts_list:
+                params = build_params(
+                    table_name=tbl,
+                    time_slice=ts.format(
+                        iso_date_hyphens, splice_hour, iso_date_hyphens, splice_hour
+                    ),
+                )
+                # Need to use a *user API key* here (and not a query API key).
+                tmp_data = self.get_fresh_query_result(
+                    "https://sql.telemetry.mozilla.org",
+                    self.QUERY_ID,
+                    STMO_API_KEY,
+                    params,
+                )
+                data.extend(tmp_data)
         return data
