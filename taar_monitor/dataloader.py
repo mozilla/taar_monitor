@@ -33,6 +33,7 @@ INSTALL_EVENTS_PATH = "taar-metrics/install_events"
 LOCALE_PATH = "taar-metrics/locale"
 ENSEMBLE_PATH = "taar-metrics/ensemble"
 COLLABORATIVE_PATH = "taar-metrics/collaborative"
+SUGGESTIONS_PATH = "taar-metrics/suggestions/weekly_rollup"
 
 
 MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY = range(7)
@@ -63,7 +64,8 @@ schema_suggestions = StructType(
 def get_week_suggestions(sqlContext, sparkContext, d_start):
     week_data = sqlContext.createDataFrame(sparkContext.emptyRDD(), schema_suggestions)
     for i in range(7):
-        READ_LOC = "taar_suggestions/{}.csv".format(datestr(d_start + timedelta(i)))
+        thedate = datestr(d_start + timedelta(i))
+        READ_LOC = "s3://{}/{}/{}.csv".format(DEFAULT_BUCKET, SUGGESTIONS_PATH, thedate)
         week_data = week_data.union(sqlContext.read.csv(READ_LOC, header=True))
     return week_data
 
@@ -99,7 +101,9 @@ def weekly_ensemble_rollup(spark, sparkContext, sqlContext, week_end_date):
     d = week_start_date
     while d < week_end_date:
         suggestions = ens.get_suggestion_df(d)
-        OUTPUT_LOC = "taar_suggestions/{}.csv".format(datestr(d))
+        OUTPUT_LOC = "s3://{}/{}/{}.csv".format(
+            DEFAULT_BUCKET, SUGGESTIONS_PATH, datestr(d)
+        )
 
         backfill = (
             suggestions.where(col("top_4") == True)  # noqa
@@ -140,7 +144,7 @@ def weekly_ensemble_rollup(spark, sparkContext, sqlContext, week_end_date):
         )
         d += timedelta(7)
 
-    OUTPUT_LOC = "week_rollup.csv"
+    OUTPUT_LOC = "s3://{}/{}/week_rollup.csv".format(DEFAULT_BUCKET, SUGGESTIONS_PATH)
     week_rollup.write.format("com.databricks.spark.csv").options(
         inferschema="true"
     ).option("header", "true").save(OUTPUT_LOC, mode="overwrite")
@@ -205,7 +209,7 @@ def update_locale(spark, num_days=30):
 
 
 def update_ensemble_suggestions(spark, num_days=30, end_date=None):
-    ensemble_gen = EnsembleSuggestionData(spark)
+    ensemble_gen = EnsembleSuggestionData(spark, DEFAULT_BUCKET, ENSEMBLE_PATH)
 
     if end_date is None:
         today = date.today()
