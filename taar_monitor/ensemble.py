@@ -126,8 +126,16 @@ class EnsembleSuggestionData(AbstractData):
 
         s3_path = s3_normpath(self._s3_path, filename)
         s3_human_path = "s3a://{}/{}".format(self._s3_bucket, s3_path)
-        print("Fetching: {}".format(s3_human_path))
-        return self._spark.read.csv(s3_human_path)
+        spark_schema = StructType(
+            [
+                StructField("client", StringType()),
+                StructField("guid", StringType()),
+                StructField("top_4", BooleanType()),
+                StructField("timestamp", LongType()),
+            ]
+        )
+
+        return self._spark.read.csv(s3_human_path, schema=spark_schema)
 
     def _get_raw_data(self, tbl_date):
         """

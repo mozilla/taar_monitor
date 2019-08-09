@@ -87,12 +87,14 @@ def weekly_ensemble_rollup(spark, sparkContext, sqlContext, week_end_date):
 
     week_start_date = week_end_date - timedelta(days=7)
 
+    TODAY = date.today()
+
     # Verify that the start date is a Sunday
     end_dow = week_end_date.weekday()
-    if not (end_dow == SUNDAY and ((week_end_date - week_start_date).days == 7)):
+    if not ((end_dow == SUNDAY) and ((TODAY - week_end_date).days > 7)):
         raise Exception("Invalid date range for weekly enssemble rollup")
 
-    ens = EnsembleSuggestionData(spark)
+    ens = EnsembleSuggestionData(spark, DEFAULT_BUCKET, ENSEMBLE_PATH)
     # daily suggestions
     d = week_start_date
     while d < week_end_date:
@@ -127,7 +129,7 @@ def weekly_ensemble_rollup(spark, sparkContext, sqlContext, week_end_date):
     d = week_start_date
     while d + timedelta(6) < week_end_date:
         print(d)
-        week_suggestions = get_week_suggestions(d)
+        week_suggestions = get_week_suggestions(sqlContext, sparkContext, d)
         week_rollup = week_rollup.union(
             week_suggestions.groupBy("guid")
             .agg(
