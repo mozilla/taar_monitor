@@ -3,7 +3,7 @@ from setuptools import find_packages, setup
 setup(
     name="taar-monitor",
     use_scm_version=False,
-    version="0.0.1",
+    version="0.0.2",
     setup_requires=["setuptools_scm", "pytest-runner"],
     tests_require=['pytest', 'mock', 'pytest-mock'],
     include_package_data=True,
@@ -20,7 +20,7 @@ setup(
         "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.5",
+        "Programming Language :: Python :: 3.7",
         "Topic :: Internet :: WWW/HTTP",
         "Topic :: Scientific/Engineering :: Information Analysis",
     ],

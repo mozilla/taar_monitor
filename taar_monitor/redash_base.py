@@ -1,8 +1,24 @@
+"""
+redash base module to provide access to API queries.
+
+We normally use python-decouple to pull in enviroment variables for
+the STMO_API_KEY, however `airflow.models.Variable` is also supported
+"""
+
 import requests
 import time
 from decouple import config
 
-STMO_API_KEY = config("STMO_API_KEY")
+STMO_API_KEY = config("STMO_API_KEY", None)
+
+if STMO_API_KEY is None:
+    try:
+        from airflow.models import Variable
+        STMO_API_KEY = Variable.get("STMO_API_KEY")
+    except Exception:
+        # Nothing we can do to recover from this, let a subsequent
+        # call to redash just fail
+        pass
 
 
 def build_params(**param_dict):

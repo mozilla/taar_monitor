@@ -10,8 +10,18 @@ from datetime import date, timedelta
 from io import StringIO
 import boto3
 import botocore
+from hashlib import sha256
+
+import json
 import csv
 import os.path
+
+import pyspark.sql.functions as F
+from pyspark.sql.functions import col, lit
+from pyspark.sql.functions import udf
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType
+
+from taar_monitor.utils import safe_createDataFrame
 
 
 check_py3()
@@ -23,6 +33,115 @@ INSTALL_EVENTS_PATH = "taar-metrics/install_events"
 LOCALE_PATH = "taar-metrics/locale"
 ENSEMBLE_PATH = "taar-metrics/ensemble"
 COLLABORATIVE_PATH = "taar-metrics/collaborative"
+
+
+MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY = range(7)
+
+
+def get_whitelist(spark, thedate):
+    f = StringIO()
+    client = boto3.client("s3")
+    client.download_fileobj(
+        "telemetry-parquet", "taar/locale/only_guids_top_200{}.json".format(thedate), f
+    )
+    guids = json.loads(f.getvalue())
+    df = safe_createDataFrame(spark, guids, StringType())
+    return df
+
+
+sha256_udf = udf(lambda clientid: sha256(clientid).hexdigest(), StringType())
+
+schema_suggestions = StructType(
+    [
+        StructField("client", StringType(), True),
+        StructField("guid", StringType(), True),
+        StructField("s3_date", StringType(), True),
+    ]
+)
+
+
+def get_week_suggestions(sqlContext, sparkContext, d_start):
+    week_data = sqlContext.createDataFrame(sparkContext.emptyRDD(), schema_suggestions)
+    for i in range(7):
+        READ_LOC = "taar_suggestions/{}.csv".format(datestr(d_start + timedelta(i)))
+        week_data = week_data.union(sqlContext.read.csv(READ_LOC, header=True))
+    return week_data
+
+
+def make_df_copy(df):
+    return df.select([c for c in df.columns])
+
+
+def datestr(date):
+    return date.strftime("%Y%m%d")
+
+
+def weekly_ensemble_rollup(spark, sparkContext, sqlContext, week_end_date):
+    """
+    This was formerly `run_backfill` in the notebook
+    Compute a weekly rollup from week_start_date to week_end_date,
+    excluding the week_end_date from the dataset.
+
+    The dates must be sunday to sunday covering a 7 day window.
+    """
+
+    week_start_date = week_end_date - timedelta(days=7)
+
+    # Verify that the start date is a Sunday
+    end_dow = week_end_date.weekday()
+    if not (end_dow == SUNDAY and ((week_end_date - week_start_date).days == 7)):
+        raise Exception("Invalid date range for weekly enssemble rollup")
+
+    ens = EnsembleSuggestionData(spark)
+    # daily suggestions
+    d = week_start_date
+    while d < week_end_date:
+        suggestions = ens.get_suggestion_df(d)
+        OUTPUT_LOC = "taar_suggestions/{}.csv".format(datestr(d))
+
+        backfill = (
+            suggestions.where(col("top_4") == True)  # noqa
+            .drop("top_4")
+            .withColumn("s3_date", lit(datestr(d)))
+            .select("client", "guid", "s3_date")
+            .distinct()
+        )
+
+        backfill.write.format("com.databricks.spark.csv").options(
+            inferschema="true"
+        ).option("header", "true").save(OUTPUT_LOC, mode="overwrite")
+        d += timedelta(days=1)
+
+    # for weekly rollups
+    schema_doc = StructType(
+        [
+            StructField("guid", StringType(), True),
+            StructField("unique_users_recd", StringType(), True),
+            StructField("times_recd", IntegerType(), True),
+            StructField("week_start", IntegerType(), True),
+        ]
+    )
+
+    week_rollup = sqlContext.createDataFrame(sparkContext.emptyRDD(), schema_doc)
+
+    d = week_start_date
+    while d + timedelta(6) < week_end_date:
+        print(d)
+        week_suggestions = get_week_suggestions(d)
+        week_rollup = week_rollup.union(
+            week_suggestions.groupBy("guid")
+            .agg(
+                F.countDistinct("client").alias("unique_users_recd"),
+                F.count("client").alias("times_recd"),
+            )
+            .withColumn("week_start", lit(datestr(d)))
+        )
+        d += timedelta(7)
+
+    OUTPUT_LOC = "week_rollup.csv"
+    week_rollup.write.format("com.databricks.spark.csv").options(
+        inferschema="true"
+    ).option("header", "true").save(OUTPUT_LOC, mode="overwrite")
 
 
 def update_install_events(spark, num_days=30, end_date=None):
@@ -85,6 +204,7 @@ def update_locale(spark, num_days=30):
 
 def update_ensemble_suggestions(spark, num_days=30, end_date=None):
     ensemble_gen = EnsembleSuggestionData(spark)
+
     if end_date is None:
         today = date.today()
     else:
@@ -92,15 +212,7 @@ def update_ensemble_suggestions(spark, num_days=30, end_date=None):
 
     for i in range(num_days):
         thedate = today - timedelta(days=(i + 1))
-        filename = thedate.strftime("%Y%m%d.csv")
-        if not s3_file_exists(DEFAULT_BUCKET, ENSEMBLE_PATH, filename):
-            rows = ensemble_gen.get_suggestions(thedate)
-            fout = StringIO()
-            writer = csv.writer(fout)
-            writer.writerows(rows)
-            fout.seek(0)
-            data = fout.getvalue().encode("utf8")
-            _store_to_s3(data, DEFAULT_BUCKET, ENSEMBLE_PATH, filename)
+        ensemble_gen.write_s3(thedate, DEFAULT_BUCKET, ENSEMBLE_PATH)
 
 
 def update_collaborative_suggestions(spark, num_days=30):
