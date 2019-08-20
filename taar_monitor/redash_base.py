@@ -74,11 +74,15 @@ class AbstractData:
     def _query_redash(self, tbl_date):
         """
         This splices up the query to the redash table into 24 hour long slices
-        to reduce the chance that we exceed the maximum row count in a resultset
+        to reduce the chance that we exceed the maximum row count in a
+        resultset.
+
+        Each set of data is yielded so that we can persist the results
+        into S3 incrementally without blowing through all the system
+        memory.
         """
         iso_date = tbl_date.strftime("%Y%m%d")
         tbl = "taar_prod_logs.docker_taar_api_{}".format(iso_date)
-        data = []
 
         ts_list = [
             """ AND timestamp >= '{} {:01d}:00:00' AND timestamp < '{} {:01d}:29:59'""",
@@ -100,5 +104,4 @@ class AbstractData:
                     STMO_API_KEY,
                     params,
                 )
-                data.extend(tmp_data)
-        return data
+                yield tmp_data
