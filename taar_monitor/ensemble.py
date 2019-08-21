@@ -82,9 +82,7 @@ class EnsembleSuggestionData(AbstractData):
                     continue
 
                 client_id = client_re.findall(payload)[0]
-                for guid_rank, guid in enumerate(guids):
-                    parsed_data = (client_id, guid, guid_rank < 4, ts)
-                    chunk_rows.extend(parsed_data)
+                chunk_rows.extend([(client_id, guid, guid_rank < 4, ts) for guid_rank, guid in enumerate(guids)])
 
             # Write out this chunk of rows to S3
             iso_strdate = tbl_date.strftime("%Y%m%d")

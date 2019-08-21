@@ -54,9 +54,7 @@ class CollaborativeSuggestionData(AbstractData):
                     continue
 
                 client_id = client_re.findall(payload)[0]
-                for guid in guids:
-                    parsed_data = (client_id, guid, ts)
-                    chunk_rows.extend(parsed_data)
+                chunk_rows.extend([(client_id, guid, ts) for guid in guids])
 
             # Write out this chunk of rows to S3
             iso_strdate = tbl_date.strftime("%Y%m%d")
