@@ -19,12 +19,13 @@ def date_to_ts(dt):
 class LocaleSuggestionData(AbstractData):
     QUERY_ID = 63422
 
-    def __init__(self, spark, s3_bucket, s3_path, aws_key, aws_secret):
+    def __init__(self, spark, s3_bucket, s3_path):
         super().__init__(spark)
 
         self._s3_bucket = s3_bucket
         self._s3_path = s3_path
-        self._fs = s3fs.S3FileSystem(key=aws_key, secret=aws_secret)
+
+        self._fs = s3fs.S3FileSystem()
 
         self._spark_schema = StructType(
             [

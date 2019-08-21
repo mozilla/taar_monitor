@@ -3,6 +3,8 @@ import os
 import boto3
 import botocore
 from py4j.protocol import Py4JJavaError
+import json
+import requests
 
 
 def check_py3():
@@ -63,3 +65,17 @@ def s3_file_exists(bucket, path, filename):
         # Re-raise the exception as something terrible has happened in
         # AWS
         raise
+
+
+def get_addon_default_name(guid):
+    uri = "https://addons.mozilla.org/api/v3/addons/search/?app=firefox&sort=created&type=extension&guid={}"
+    detail_uri = uri.format(guid.encode("utf8"))
+    req = requests.get(detail_uri)
+
+    try:
+        jdata = json.loads(req.content)
+        blob = jdata["results"][0]
+        locale = blob["default_locale"]
+        return blob["name"][locale]
+    except Exception:
+        return guid

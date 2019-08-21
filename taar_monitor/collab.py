@@ -3,43 +3,22 @@ This module provides access to the logs that are uplifted into
 sql.telemetry.mozilla.org from the TAAR production logs
 """
 
-from pyspark.sql.types import LongType, StringType, StructField, StructType
 import dateutil.parser
-import json
+import csv
 import ast
 import re
-import requests
+from pyspark.sql.types import LongType, StringType, StructField, StructType
 
 from .redash_base import AbstractData
-
-
-def get_addon_default_name(guid):
-    uri = "https://addons.mozilla.org/api/v3/addons/search/?app=firefox&sort=created&type=extension&guid={}"
-    detail_uri = uri.format(guid.encode("utf8"))
-    req = requests.get(detail_uri)
-
-    try:
-        jdata = json.loads(req.content)
-        blob = jdata["results"][0]
-        locale = blob["default_locale"]
-        return blob["name"][locale]
-    except Exception:
-        return guid
 
 
 class CollaborativeSuggestionData(AbstractData):
     QUERY_ID = 63284
 
-    def __init__(self, spark):
+    def __init__(self, spark, s3_bucket, s3_path):
         super().__init__(spark)
 
-    def get_suggestion_df(self, tbl_date):
-        row_iter = self._get_raw_data(tbl_date)
-
-        return list(row_iter)
-
-        """
-        cSchema = StructType(
+        self._schema = StructType(
             [
                 StructField("client", StringType()),
                 StructField("guid", StringType()),
@@ -47,30 +26,45 @@ class CollaborativeSuggestionData(AbstractData):
             ]
         )
 
-        df = self._spark.createDataFrame(list(row_iter), schema=cSchema)
-        return df
-        """
+    def get_suggestion_df(self, tbl_date):
+        cached_results = self._get_cached_df(tbl_date)
+        if cached_results is None:
+            self._write_raw_data(tbl_date)
+            cached_results = self._get_cached_df(tbl_date)
 
-    def _get_raw_data(self, tbl_date):
+        return cached_results
+
+    def _wriite_raw_data(self, tbl_date):
         """
         Yield 3-tuples of (sha256 hashed client_id, guid, timestamp)
         """
         guids_re = re.compile(r"guids *: *\[(\[[^]]*\])")
         client_re = re.compile(r"client_id *: *\[([^]]*)\]")
 
-        results = self._query_redash(tbl_date)
+        for chunk_id, chunk in self._query_redash(tbl_date):
+            chunk_rows = []
+            for row in chunk:
+                ts = int(dateutil.parser.parse(row["TIMESTAMP"]).timestamp())
+                payload = row["msg"]
+                guids_json = guids_re.findall(payload)[0]
+                try:
+                    guids = ast.literal_eval(guids_json)
+                except Exception:
+                    print("Error parsing GUIDS out of : {}".format(guids_json))
+                    continue
 
-        for row in results:
-            ts = int(dateutil.parser.parse(row["TIMESTAMP"]).timestamp())
-            payload = row["msg"]
-            guids_json = guids_re.findall(payload)[0]
-            try:
-                guids = ast.literal_eval(guids_json)
-            except Exception:
-                print("Error parsing GUIDS out of : {}".format(guids_json))
-                continue
+                client_id = client_re.findall(payload)[0]
+                for guid in guids:
+                    parsed_data = (client_id, guid, ts)
+                    chunk_rows.extend(parsed_data)
 
-            client_id = client_re.findall(payload)[0]
-            for guid in guids:
-                parsed_data = (client_id, guid, ts)
-                yield parsed_data
+            # Write out this chunk of rows to S3
+            iso_strdate = tbl_date.strftime("%Y%m%d")
+
+            filename = "{}.csv.part{:05d}".format(iso_strdate, chunk_id)
+            s3_dirpath = self._s3_path + "/" + iso_strdate + "/parts"
+            s3_fname = "{}/{}/{}".format(self._s3_bucket, s3_dirpath, filename)
+            print("Writing to {}".format(s3_fname))
+            with self._fs.open(s3_fname, "w") as fout:
+                writer = csv.writer(fout)
+                writer.writerows(chunk_rows)
