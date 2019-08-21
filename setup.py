@@ -3,7 +3,7 @@ from setuptools import find_packages, setup
 setup(
     name="taar-monitor",
     use_scm_version=False,
-    version="0.0.9",
+    version="0.0.10",
     setup_requires=["setuptools_scm", "pytest-runner"],
     tests_require=['pytest', 'mock', 'pytest-mock'],
     include_package_data=True,
