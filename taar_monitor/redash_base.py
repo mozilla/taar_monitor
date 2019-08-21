@@ -47,7 +47,6 @@ class AbstractData:
         s.headers.update({"Authorization": "Key {}".format(api_key)})
 
         url = "{}/api/queries/{}/refresh".format(redash_url, query_id)
-        print("APIKey: {}".format(api_key))
         print("hitting URL: {}".format(url))
         print("params: {}".format(params))
 
