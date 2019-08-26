@@ -1,21 +1,17 @@
-import os
 import requests
 import time
-from pprint import pprint
 from decouple import config
-from pyspark.sql.types import *
+from pyspark.sql.types import LongType, StructField, StructType, FloatType
 
 import dateutil.parser
-
-STMO_API_KEY = config("STMO_API_KEY")
 
 
 class WorkflowTaskInfo:
     QUERY_ID = 63309
-    API_KEY = STMO_API_KEY
 
     def __init__(self, spark):
         self._spark = spark
+        self.API_KEY = config("STMO_API_KEY", "")
 
     def poll_job(self, s, redash_url, job):
         # TODO: add timeout
@@ -102,6 +98,12 @@ class WorkflowTaskInfo:
 
         :return: A list of 2-tuples of of (datetime, duration in seconds) in chronological order
         """
+
+        """
+        This should save the results for each execution record into a
+        date stamped CSV file in S3 so that we can restore data
+        directly from S3.
+        """
         data = self._get_runtime(
             dag_id=dag_id,
             task_id=task_id,
@@ -114,8 +116,11 @@ class WorkflowTaskInfo:
                 tuples.append((r["start_date"], r["duration"]))
             else:
                 tuples.append((r["start_date"], 0))
+
         parsed_tuples = [
-            (int(dateutil.parser.parse(r[0]).timestamp()), r[1]) for r in tuples
+            (int(dateutil.parser.parse(r[0]).timestamp()), float(r[1]))
+            for r in tuples
+            if (r[0] is not None and r[1] is not None)
         ]
 
         cSchema = StructType(

@@ -9,7 +9,7 @@ import requests
 import time
 from decouple import config
 
-STMO_API_KEY = config("STMO_API_KEY", None)
+STMO_API_KEY = config("STMO_API_KEY", '')
 
 if STMO_API_KEY is None:
     try:

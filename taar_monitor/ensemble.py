@@ -9,8 +9,15 @@ import re
 import csv
 import s3fs
 
+from datetime import date, timedelta
 from pyspark.sql.types import StructType, StringType, BooleanType, LongType, StructField
+from pyspark.sql.functions import col, lit
 from .redash_base import AbstractData
+from .utils import format_to_short_isodate
+
+
+DAILY_SUMMARY_PATH = "taar-metrics/ensemble/daily_suggestions"
+WEEKLY_SUMMARY_PATH = "taar-metrics/ensemble/weekly_suggestions"
 
 
 class EnsembleSuggestionData(AbstractData):
@@ -82,7 +89,12 @@ class EnsembleSuggestionData(AbstractData):
                     continue
 
                 client_id = client_re.findall(payload)[0]
-                chunk_rows.extend([(client_id, guid, guid_rank < 4, ts) for guid_rank, guid in enumerate(guids)])
+                chunk_rows.extend(
+                    [
+                        (client_id, guid, guid_rank < 4, ts)
+                        for guid_rank, guid in enumerate(guids)
+                    ]
+                )
 
             # Write out this chunk of rows to S3
             iso_strdate = tbl_date.strftime("%Y%m%d")
@@ -94,3 +106,63 @@ class EnsembleSuggestionData(AbstractData):
             with self._fs.open(s3_fname, "w") as fout:
                 writer = csv.writer(fout)
                 writer.writerows(chunk_rows)
+
+    def _get_week_suggestions(self, d_start):
+        schema_suggestions = StructType(
+            [
+                StructField("client", StringType(), True),
+                StructField("guid", StringType(), True),
+                StructField("s3_date", StringType(), True),
+            ]
+        )
+
+        week_data = self._spark.createDataFrame(
+            self._spark.emptyRDD(), schema_suggestions
+        )
+        for i in range(7):
+            READ_LOC = "taar_suggestions/{}.csv".format(
+                format_to_short_isodate(d_start + timedelta(i))
+            )
+            week_data = week_data.union(self._spark.read.csv(READ_LOC, header=True))
+        return week_data
+
+    def _write_daily_summary(self, thedate):
+        OUTPUT_LOC = "s3://{}/{}/{}.csv".format(
+            self._s3_bucket, DAILY_SUMMARY_PATH, format_to_short_isodate(thedate)
+        )
+
+        suggestions_by_date_df = (
+            self.get_suggestion_df(thedate)
+            .where(col("top_4") == True)
+            .drop("top_4")
+            .withColumn("s3_date", lit(format_to_short_isodate(thedate)))
+            .select("client", "guid", "s3_date")
+            .distinct()
+        )
+
+        suggestions_by_date_df.write.format("com.databricks.spark.csv").options(
+            inferschema="true"
+        ).option("header", "true").save(OUTPUT_LOC, mode="overwrite")
+
+    def weekly_ensemble_rollup(self, thedate):
+
+        # The weekly rollup can only be done on a day prior to today
+        assert (date.today() - thedate).days >= 1
+
+        self._write_daily_summary(thedate)
+
+        # add weekly rollup on Sunday
+        if thedate.weekday() == 6:
+            tmp_date = thedate - timedelta(days=7)
+            week_rollup = (
+                self._get_week_suggestions(tmp_date)
+                .groupBy("guid")
+                .agg(
+                    F.countDistinct("client").alias("unique_users_recd"),
+                    F.count("client").alias("times_recd"),
+                )
+                .withColumn("week_start", lit(format_to_short_isodate(tmp_date)))
+            )
+            week_rollup.write.format("com.databricks.spark.csv").options(
+                inferschema="true"
+            ).option("header", "true").save("week_rollup.csv", mode="append")

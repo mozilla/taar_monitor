@@ -79,3 +79,7 @@ def get_addon_default_name(guid):
         return blob["name"][locale]
     except Exception:
         return guid
+
+
+def format_to_short_isodate(date):
+    return date.strftime("%Y%m%d")
