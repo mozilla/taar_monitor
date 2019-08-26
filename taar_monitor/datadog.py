@@ -58,11 +58,50 @@ class DataDogSource:
             [StructField("timestamp", LongType()), StructField("latency", FloatType())]
         )
 
-    def get_http200_served(self, minutes=14 * 24 * 60):
+        self._http_schema = StructType(
+            [StructField("timestamp", LongType()), StructField("latency", FloatType())]
+        )
+
+    def get_http200_served_df(self):
         """
         :return: count of HTTP200 requests served within the last 14
         days
         """
+        end_date = date.today() - timedelta(days=1)
+        start_date = end_date - timedelta(days=14)
+
+        cached_results = self._get_cached_http200_df(start_date, end_date)
+        if cached_results is None:
+            self._write_http200()
+            cached_results = self._get_cached_http200_df(start_date, end_date)
+        return cached_results
+
+    def _get_cached_http200_df(self, start_date, end_date):
+        df_list = []
+        sdate = start_date
+        while sdate < end_date:
+            iso_strdate = sdate.strftime("%Y%m%d")
+
+            filename = iso_strdate + ".csv"
+            s3_human_path = "s3a://{}/{}/http200/{}".format(
+                self._s3_bucket, self._s3_path, filename
+            )
+
+            print("Reading {}".format(s3_human_path))
+            try:
+                new_df = self._spark.read.csv(s3_human_path, schema=self._http_schema)
+                df_list.append(new_df)
+                print("Read {}".format(s3_human_path))
+            except Exception:
+                # If any data is missing, just return None and just
+                # recompute the entire day of data
+                return None
+
+            sdate = sdate + timedelta(days=1)
+
+        return unionAll(*df_list)
+
+    def _write_http200(self, minutes=15 * 24 * 60):
         cmd = "sum"
         metric = "aws.elb.httpcode_backend_2xx"
         tags = "{app:data,stack:taar,env:prod}"
@@ -75,15 +114,46 @@ class DataDogSource:
             as_count=True,
         )
 
-        results = []
+        result = []
 
         if data["status"] == "ok":
-            results = [
-                (msts_to_sects(ts), scalar)
+            result = [
+                (msts_to_sects(ts), float(scalar))
                 for (ts, scalar) in data["series"][0]["pointlist"]
             ]
 
-        return results
+        hour_ago_cutoff = datetime.now() - timedelta(hours=1)
+
+        # Collect all the records into a dictionary of
+        # "y-m-d" -> list of records for the day
+        records = {}
+        for rec in result:
+            parsed_date = datetime.fromtimestamp(rec[0])
+            if parsed_date < hour_ago_cutoff:
+                rec_isodate = parsed_date.strftime("%Y%m%d")
+                records.setdefault(rec_isodate, [])
+                records[rec_isodate].append(rec)
+
+        for isodate, new_rows in records.items():
+            filename = isodate + ".csv"
+            s3_fname = "{}/{}/http200/{}".format(
+                self._s3_bucket, self._s3_path, filename
+            )
+
+            # Write out this chunk of rows for one day to S3 merging
+            # with any existing data
+            try:
+                if self._fs.exists(s3_fname):
+                    with self._fs.open(s3_fname, "r") as file_in:
+                        reader = csv.reader(file_in)
+                        new_rows = list(set(reader.readrows()) + set(new_rows))
+            except Exception:
+                pass
+
+            with self._fs.open(s3_fname, "w") as fout:
+                writer = csv.writer(fout)
+                writer.writerows(new_rows)
+            print("Wrote out {}".format(s3_fname))
 
     def get_dynamodb_read_latency_df(self):
 
