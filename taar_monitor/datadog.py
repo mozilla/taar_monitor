@@ -11,7 +11,12 @@ import dateutil
 import time
 import s3fs
 
-# from .utils import safe_createDataFrame
+from functools import reduce  # For Python 3.x
+from pyspark.sql import DataFrame
+
+
+def unionAll(*dfs):
+    return reduce(DataFrame.unionAll, dfs)
 
 
 def msts_to_sects(ts):
@@ -92,7 +97,8 @@ class DataDogSource:
         return cached_results
 
     def _get_cached_dynamo_df(self, start_date, end_date):
-        df = None
+
+        df_list = []
         sdate = start_date
         while sdate < end_date:
             iso_strdate = sdate.strftime("%Y%m%d")
@@ -104,16 +110,16 @@ class DataDogSource:
                 new_df = self._spark.read.csv(
                     s3_human_path, schema=self._dynamo_read_schema
                 )
-                if df is not None:
-                    df = df.union(new_df)
-                else:
-                    df = new_df
+                df_list.append(new_df)
+                print("Read {}".format(s3_human_path))
             except Exception:
+                # If any data is missing, just return None and just
+                # recompute the entire day of data
                 return None
 
             sdate = sdate + timedelta(days=1)
 
-        return df
+        return unionAll(*df_list)
 
     def _write_dynamo_read_latency(self, minutes=15 * 24 * 60):
         """
@@ -135,15 +141,17 @@ class DataDogSource:
         # "y-m-d" -> list of records for the day
         records = {}
         for rec in result:
-            parsed_rec = {"date": datetime.fromtimestamp(rec[0]), "latency": rec[1]}
-            if parsed_rec["date"] < hour_ago_cutoff:
-                rec_isodate = parsed_rec["date"].strftime("%Y%m%d")
+            parsed_date = datetime.fromtimestamp(rec[0])
+            if parsed_date < hour_ago_cutoff:
+                rec_isodate = parsed_date.strftime("%Y%m%d")
                 records.setdefault(rec_isodate, [])
                 records[rec_isodate].append(rec)
 
         for isodate, new_rows in records.items():
             filename = isodate + ".csv"
-            s3_fname = "{}/{}/latency/{}".format(self._s3_bucket, self._s3_path, filename)
+            s3_fname = "{}/{}/latency/{}".format(
+                self._s3_bucket, self._s3_path, filename
+            )
 
             # Write out this chunk of rows for one day to S3 merging
             # with any existing data
