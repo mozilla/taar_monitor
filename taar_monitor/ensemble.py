@@ -16,8 +16,8 @@ from pyspark.sql.types import (
     BooleanType,
     LongType,
     StructField,
+    IntegerType,
 )
-from pyspark.sql.functions import col, lit
 import pyspark.sql.functions as F
 
 from .redash_base import AbstractData
@@ -105,6 +105,19 @@ class EnsembleSuggestionData(AbstractData):
             week_data = week_data.union(self._spark.read.csv(READ_LOC, header=True))
         return week_data
 
+    def read_daily_suggestion_rollup(self, thedate):
+        schema_suggestions = StructType(
+            [
+                StructField("client", StringType(), True),
+                StructField("guid", StringType(), True),
+                StructField("s3_date", StringType(), True),
+            ]
+        )
+        LOC = "s3://{}/{}".format(
+            self._s3_bucket, DAILY_SUGGESTIONS_PATH.format(thedate.strftime("%Y%m%d"))
+        )
+        return self._.read.csv(LOC, schema=schema_suggestions)
+
     def write_daily_suggestion_rollup(self, thedate):
         """
         Compute daily suggestions
@@ -120,9 +133,9 @@ class EnsembleSuggestionData(AbstractData):
             )
 
             backfill = (
-                suggestions.where(col("top_4") == True)  # noqa
+                suggestions.where(F.col("top_4") == True)  # noqa
                 .drop("top_4")
-                .withColumn("s3_date", lit(datestr(d)))
+                .withColumn("s3_date", F.lit(datestr(d)))
                 .select("client", "guid", "s3_date")
                 .distinct()
             )
@@ -132,6 +145,19 @@ class EnsembleSuggestionData(AbstractData):
             ).option("header", "true").save(OUTPUT_LOC, mode="overwrite")
 
             d += timedelta(days=1)
+
+    def read_weekly_suggestion_rollup(self, thedate):
+        weekly_suggestion_schema = StructType(
+            [
+                StructField("guid", StringType(), True),
+                StructField("unique_users_recd", StringType(), True),
+                StructField("times_recd", IntegerType(), True),
+                StructField("week_start", IntegerType(), True),
+            ]
+        )
+
+        LOC = "s3://{}/{}".format(self._s3_bucket, WEEKLY_ROLLUP_PATH.format(thedate))
+        return self._spark.read.csv(LOC, schema=weekly_suggestion_schema)
 
     def write_weekly_suggestion_rollup(self, thedate):
         """
