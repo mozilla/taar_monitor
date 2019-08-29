@@ -156,7 +156,7 @@ class EnsembleSuggestionData(AbstractData):
             ]
         )
 
-        LOC = "s3://{}/{}".format(self._s3_bucket, WEEKLY_ROLLUP_PATH.format(thedate))
+        LOC = "s3://{}/{}".format(self._s3_bucket, WEEKLY_ROLLUP_PATH.format(datestr(thedate)))
         return self._spark.read.csv(LOC, schema=weekly_suggestion_schema)
 
     def write_weekly_suggestion_rollup(self, thedate):
