@@ -10,14 +10,29 @@ import csv
 import s3fs
 
 from datetime import date, timedelta
-from pyspark.sql.types import StructType, StringType, BooleanType, LongType, StructField
+from pyspark.sql.types import (
+    StructType,
+    StringType,
+    BooleanType,
+    LongType,
+    StructField,
+    IntegerType,
+)
 from pyspark.sql.functions import col, lit
+import pyspark.sql.functions as F
+
 from .redash_base import AbstractData
-from .utils import format_to_short_isodate
 
 
-DAILY_SUMMARY_PATH = "taar-metrics/ensemble/daily_suggestions"
-WEEKLY_SUMMARY_PATH = "taar-metrics/ensemble/weekly_suggestions"
+DAILY_SUGGESTIONS_PATH = "taar-metrics/ensemble/daily_suggestions/{}.csv"
+WEEKLY_ROLLUP_PATH = "taar-metrics/ensemble/weekly_suggestions/{}.csv"
+
+
+MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY = range(7)
+
+
+def datestr(date):
+    return date.strftime("%Y%m%d")
 
 
 class EnsembleSuggestionData(AbstractData):
@@ -40,15 +55,11 @@ class EnsembleSuggestionData(AbstractData):
             ]
         )
 
-    def get_suggestions(self, tbl_date):
-        return list(self._get_raw_data(tbl_date))
-
     def get_suggestion_df(self, tbl_date):
         cached_results = self._get_cached_df(tbl_date)
         if cached_results is None:
-            self._write_raw_data(tbl_date)
+            self._write_raw_ensemble_data(tbl_date)
             cached_results = self._get_cached_df(tbl_date)
-
         return cached_results
 
     def _get_cached_df(self, data_date):
@@ -67,7 +78,110 @@ class EnsembleSuggestionData(AbstractData):
             # No cached dataset is found
             return None
 
-    def _write_raw_data(self, tbl_date):
+    def compute_weekly_suggestion_rollup(self, sunday_start_date):
+        """
+        Fetch week suggestions starting with sunday_start_date.
+
+        Reads 7 CSV files from DAILY_SUGGESTIONS_PATH directory and
+        reading in 7 files with YYYYMMDD.csv extension.
+        """
+        schema_suggestions = StructType(
+            [
+                StructField("client", StringType(), True),
+                StructField("guid", StringType(), True),
+                StructField("s3_date", StringType(), True),
+            ]
+        )
+
+        week_data = self._spark.createDataFrame(
+            self._spark.emptyRDD(), schema_suggestions
+        )
+
+        for i in range(7):
+            thedate_str = datestr(sunday_start_date + timedelta(days=i))
+            READ_LOC = "s3://{}/{}".format(
+                self._s3_bucket, DAILY_SUGGESTIONS_PATH.format(thedate_str)
+            )
+
+            week_data = week_data.union(self._spark.read.csv(READ_LOC, header=True))
+        return week_data
+
+    def write_daily_suggestion_rollup(self, thedate):
+        """
+        Compute daily suggestions
+        """
+        YESTERDAY = date.today() - timedelta(days=1)
+
+        # daily suggestions
+        d = thedate
+        while d < YESTERDAY:
+            suggestions = self.get_suggestion_df(d)
+            OUTPUT_LOC = "s3://{}/{}".format(
+                self._s3_bucket, DAILY_SUGGESTIONS_PATH.format(datestr(d))
+            )
+
+            backfill = (
+                    suggestions.where(col("top_4") == True)  # noqa
+                .drop("top_4")
+                .withColumn("s3_date", lit(datestr(d)))
+                .select("client", "guid", "s3_date")
+                .distinct()
+            )
+
+            backfill.write.format("com.databricks.spark.csv").options(
+                inferschema="true"
+            ).option("header", "true").save(OUTPUT_LOC, mode="overwrite")
+
+            d += timedelta(days=1)
+
+    def write_weekly_suggestion_rollup(self, thedate):
+        """
+        Compute a weekly rollup of suggestions starting on a Sunday
+        """
+        YESTERDAY = date.today() - timedelta(days=1)
+        OUTPUT_LOC = "s3://{}/{}".format(
+            self._s3_bucket, WEEKLY_ROLLUP_PATH.format(thedate)
+        )
+
+        if thedate.weekday() != SUNDAY:
+            # Only run the week suggestion rollup on Sunday
+            return
+
+        if (thedate + timedelta(days=6)) >= YESTERDAY:
+            # Not enough days to make a full week of weekly
+            # suggestions
+            return
+
+        # for weekly rollups
+        weekly_suggestion_schema = StructType(
+            [
+                StructField("guid", StringType(), True),
+                StructField("unique_users_recd", StringType(), True),
+                StructField("times_recd", IntegerType(), True),
+                StructField("week_start", IntegerType(), True),
+            ]
+        )
+
+        week_rollup = self._spark.createDataFrame(
+            self._spark.emptyRDD(), weekly_suggestion_schema
+        )
+
+        week_suggestions = self.compute_weekly_suggestion_rollup(thedate)
+
+        week_rollup = week_rollup.union(
+            week_suggestions.groupBy("guid")
+            .agg(
+                F.countDistinct("client").alias("unique_users_recd"),
+                F.count("client").alias("times_recd"),
+            )
+            .withColumn("week_start", lit(datestr(thedate)))
+        )
+
+        week_rollup.write.format("com.databricks.spark.csv").options(
+            inferschema="true"
+        ).option("header", "true").save(OUTPUT_LOC, mode="overwrite")
+
+    def _write_raw_ensemble_data(self, tbl_date):
         """
         Yield 3-tuples of (sha256 hashed client_id, guid, timestamp)
         """
@@ -107,62 +221,9 @@ class EnsembleSuggestionData(AbstractData):
                 writer = csv.writer(fout)
                 writer.writerows(chunk_rows)
 
-    def _get_week_suggestions(self, d_start):
-        schema_suggestions = StructType(
-            [
-                StructField("client", StringType(), True),
-                StructField("guid", StringType(), True),
-                StructField("s3_date", StringType(), True),
-            ]
-        )
+        # Compute rollups for the day
+        self.write_all_rollups(tbl_date)
 
-        week_data = self._spark.createDataFrame(
-            self._spark.emptyRDD(), schema_suggestions
-        )
-        for i in range(7):
-            READ_LOC = "taar_suggestions/{}.csv".format(
-                format_to_short_isodate(d_start + timedelta(i))
-            )
-            week_data = week_data.union(self._spark.read.csv(READ_LOC, header=True))
-        return week_data
-
-    def _write_daily_summary(self, thedate):
-        OUTPUT_LOC = "s3://{}/{}/{}.csv".format(
-            self._s3_bucket, DAILY_SUMMARY_PATH, format_to_short_isodate(thedate)
-        )
-
-        suggestions_by_date_df = (
-            self.get_suggestion_df(thedate)
-            .where(col("top_4") == True)
-            .drop("top_4")
-            .withColumn("s3_date", lit(format_to_short_isodate(thedate)))
-            .select("client", "guid", "s3_date")
-            .distinct()
-        )
-
-        suggestions_by_date_df.write.format("com.databricks.spark.csv").options(
-            inferschema="true"
-        ).option("header", "true").save(OUTPUT_LOC, mode="overwrite")
-
-    def weekly_ensemble_rollup(self, thedate):
-
-        # The weekly rollup can only be done on a day prior to today
-        assert (date.today() - thedate).days >= 1
-
-        self._write_daily_summary(thedate)
-
-        # add weekly rollup on Sunday
-        if thedate.weekday() == 6:
-            tmp_date = thedate - timedelta(days=7)
-            week_rollup = (
-                self._get_week_suggestions(tmp_date)
-                .groupBy("guid")
-                .agg(
-                    F.countDistinct("client").alias("unique_users_recd"),
-                    F.count("client").alias("times_recd"),
-                )
-                .withColumn("week_start", lit(format_to_short_isodate(tmp_date)))
-            )
-            week_rollup.write.format("com.databricks.spark.csv").options(
-                inferschema="true"
-            ).option("header", "true").save("week_rollup.csv", mode="append")
+    def write_all_rollups(self, tbl_date):
+        self.write_daily_suggestion_rollup(tbl_date)
+        self.write_weekly_suggestion_rollup(tbl_date)

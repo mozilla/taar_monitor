@@ -2,19 +2,40 @@ import requests
 import time
 from decouple import config
 from pyspark.sql.types import LongType, StructField, StructType, FloatType
-
+import s3fs
 import dateutil.parser
+
+from functools import reduce  # For Python 3.x
+from pyspark.sql import DataFrame
+
+import csv
+
+
+def unionAll(*dfs):
+    return reduce(DataFrame.unionAll, dfs)
 
 
 class WorkflowTaskInfo:
     QUERY_ID = 63309
 
-    def __init__(self, spark):
+    def __init__(
+        self, spark, s3_bucket="srg-team-bucket", s3_path="taar-metrics/wtmo-jobs"
+    ):
         self._spark = spark
         self.API_KEY = config("STMO_API_KEY", "")
 
-    def poll_job(self, s, redash_url, job):
-        # TODO: add timeout
+        self._s3_bucket = s3_bucket
+        self._s3_path = s3_path
+
+        self._s3_root = "{}/{}".format(self._s3_bucket, self._s3_path)
+
+        self._fs = s3fs.S3FileSystem()
+
+        self._wtmo_schema = StructType(
+            [StructField("timestamp", LongType()), StructField("duration", FloatType())]
+        )
+
+    def _poll_job(self, s, redash_url, job):
         while job["status"] not in (3, 4):
             response = s.get("{}/api/jobs/{}".format(redash_url, job["id"]))
             job = response.json()["job"]
@@ -25,7 +46,7 @@ class WorkflowTaskInfo:
 
         return None
 
-    def get_fresh_query_result(self, redash_url, query_id, api_key, params):
+    def _get_fresh_query_result(self, redash_url, query_id, api_key, params):
         s = requests.Session()
         s.headers.update({"Authorization": "Key {}".format(api_key)})
 
@@ -38,7 +59,7 @@ class WorkflowTaskInfo:
             # print(response.status_code)
             raise Exception("Refresh failed.")
 
-        result_id = self.poll_job(s, redash_url, response.json()["job"])
+        result_id = self._poll_job(s, redash_url, response.json()["job"])
 
         if result_id:
             response = s.get(
@@ -87,12 +108,34 @@ class WorkflowTaskInfo:
             extra_where=extra_where,
             dag_id=dag_id,
         )
-        data = self.get_fresh_query_result(
+        data = self._get_fresh_query_result(
             "https://sql.telemetry.mozilla.org", self.QUERY_ID, self.API_KEY, params
         )
         return data
 
-    def get_etl_durations(self, dag_id, task_id, batch_size, extra_where=""):
+    def get_etl_durations(
+        self, dag_id, task_id, batch_size, extra_where="", force_refresh=False
+    ):
+
+        if force_refresh:
+            self.write_etl_durations(dag_id, task_id, batch_size, extra_where)
+
+        return self._get_cached_durations_df(dag_id, task_id)
+
+    def _get_cached_durations_df(self, dag_id, task_id):
+
+        filename = "{}_{}.csv".format(dag_id, task_id)
+        s3_human_path = "s3a://{}/{}".format(self._s3_root, filename)
+
+        print("Reading {}".format(s3_human_path))
+        try:
+            return self._spark.read.csv(s3_human_path, schema=self._wtmo_schema)
+        except Exception:
+            # If any data is missing, just continue
+            pass
+            return None
+
+    def write_etl_durations(self, dag_id, task_id, batch_size, extra_where=""):
         """
         Fetch a list of durations in seconds for a particular job.
 
@@ -123,9 +166,22 @@ class WorkflowTaskInfo:
             if (r[0] is not None and r[1] is not None)
         ]
 
-        cSchema = StructType(
-            [StructField("timestamp", LongType()), StructField("duration", FloatType())]
-        )
+        filename = "{}_{}.csv".format(dag_id, task_id)
+        s3_fname = "{}/{}".format(self._s3_root, filename)
 
-        df = self._spark.createDataFrame(parsed_tuples, schema=cSchema)
-        return df
+        # Write out this chunk of rows for one day to S3 merging
+        # with any existing data
+        try:
+            if self._fs.exists(s3_fname):
+                with self._fs.open(s3_fname, "r") as file_in:
+                    reader = csv.reader(file_in)
+                    parsed_tuples = list(set(reader.readrows()) + set(parsed_tuples))
+                    print("Refreshed tuples in {}".format(s3_fname))
+        except Exception:
+            pass
+
+        with self._fs.open(s3_fname, "w") as fout:
+            writer = csv.writer(fout)
+            writer.writerows(parsed_tuples)
+            print("Wrote rows: {}".format(len(parsed_tuples)))
+        print("Wrote out {}".format(s3_fname))

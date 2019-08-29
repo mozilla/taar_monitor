@@ -9,17 +9,6 @@ import requests
 import time
 from decouple import config
 
-STMO_API_KEY = config("STMO_API_KEY", '')
-
-if STMO_API_KEY is None:
-    try:
-        from airflow.models import Variable
-        STMO_API_KEY = Variable.get("STMO_API_KEY")
-    except Exception:
-        # Nothing we can do to recover from this, let a subsequent
-        # call to redash just fail
-        pass
-
 
 def build_params(**param_dict):
     tmp = dict([("p_{}".format(k), v) for k, v in param_dict.items()])
@@ -29,6 +18,18 @@ def build_params(**param_dict):
 class AbstractData:
     def __init__(self, spark):
         self._spark = spark
+
+        self.STMO_API_KEY = config("STMO_API_KEY", "")
+
+        if self.STMO_API_KEY is None:
+            try:
+                from airflow.models import Variable
+
+                self.STMO_API_KEY = Variable.get("STMO_API_KEY")
+            except Exception:
+                # Nothing we can do to recover from this, let a subsequent
+                # call to redash just fail
+                pass
 
     def poll_job(self, s, redash_url, job):
         while job["status"] not in (3, 4):
@@ -100,7 +101,7 @@ class AbstractData:
                 tmp_data = self.get_fresh_query_result(
                     "https://sql.telemetry.mozilla.org",
                     self.QUERY_ID,
-                    STMO_API_KEY,
+                    self.STMO_API_KEY,
                     params,
                 )
                 yield tmp_data
