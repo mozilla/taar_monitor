@@ -116,7 +116,7 @@ class EnsembleSuggestionData(AbstractData):
         LOC = "s3://{}/{}".format(
             self._s3_bucket, DAILY_SUGGESTIONS_PATH.format(thedate.strftime("%Y%m%d"))
         )
-        return self._.read.csv(LOC, schema=schema_suggestions)
+        return self._spark.read.csv(LOC, schema=schema_suggestions)
 
     def write_daily_suggestion_rollup(self, thedate):
         """
@@ -156,7 +156,9 @@ class EnsembleSuggestionData(AbstractData):
             ]
         )
 
-        LOC = "s3://{}/{}".format(self._s3_bucket, WEEKLY_ROLLUP_PATH.format(datestr(thedate)))
+        LOC = "s3://{}/{}".format(
+            self._s3_bucket, WEEKLY_ROLLUP_PATH.format(thedate.strftime("%Y-%m-%d"))
+        )
         return self._spark.read.csv(LOC, schema=weekly_suggestion_schema)
 
     def write_weekly_suggestion_rollup(self, thedate):
@@ -165,7 +167,7 @@ class EnsembleSuggestionData(AbstractData):
         """
         YESTERDAY = date.today() - timedelta(days=1)
         OUTPUT_LOC = "s3://{}/{}".format(
-            self._s3_bucket, WEEKLY_ROLLUP_PATH.format(thedate)
+            self._s3_bucket, WEEKLY_ROLLUP_PATH.format(thedate.strftime("%Y-%m-%d"))
         )
 
         if thedate.weekday() != SUNDAY:
