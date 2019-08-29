@@ -16,7 +16,6 @@ from pyspark.sql.types import (
     BooleanType,
     LongType,
     StructField,
-    IntegerType,
 )
 from pyspark.sql.functions import col, lit
 import pyspark.sql.functions as F
@@ -94,7 +93,7 @@ class EnsembleSuggestionData(AbstractData):
         )
 
         week_data = self._spark.createDataFrame(
-            self._spark.emptyRDD(), schema_suggestions
+            self._spark.sparkContext.emptyRDD(), schema_suggestions
         )
 
         for i in range(7):
@@ -121,7 +120,7 @@ class EnsembleSuggestionData(AbstractData):
             )
 
             backfill = (
-                    suggestions.where(col("top_4") == True)  # noqa
+                suggestions.where(col("top_4") == True)  # noqa
                 .drop("top_4")
                 .withColumn("s3_date", lit(datestr(d)))
                 .select("client", "guid", "s3_date")
@@ -153,28 +152,15 @@ class EnsembleSuggestionData(AbstractData):
             return
 
         # for weekly rollups
-        weekly_suggestion_schema = StructType(
-            [
-                StructField("guid", StringType(), True),
-                StructField("unique_users_recd", StringType(), True),
-                StructField("times_recd", IntegerType(), True),
-                StructField("week_start", IntegerType(), True),
-            ]
-        )
+        week_rollup = self.compute_weekly_suggestion_rollup(thedate)
 
-        week_rollup = self._spark.createDataFrame(
-            self._spark.emptyRDD(), weekly_suggestion_schema
-        )
-
-        week_suggestions = self.compute_weekly_suggestion_rollup(thedate)
-
-        week_rollup = week_rollup.union(
-            week_suggestions.groupBy("guid")
+        week_rollup = (
+            week_rollup.groupBy("guid")
             .agg(
                 F.countDistinct("client").alias("unique_users_recd"),
                 F.count("client").alias("times_recd"),
             )
-            .withColumn("week_start", lit(datestr(thedate)))
+            .withColumn("week_start", F.lit(datestr(thedate)))
         )
 
         week_rollup.write.format("com.databricks.spark.csv").options(
