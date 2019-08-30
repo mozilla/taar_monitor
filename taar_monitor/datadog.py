@@ -70,11 +70,7 @@ class DataDogSource:
         end_date = date.today() - timedelta(days=1)
         start_date = end_date - timedelta(days=14)
 
-        cached_results = self._get_cached_http200_df(start_date, end_date)
-        if cached_results is None:
-            self._write_http200()
-            cached_results = self._get_cached_http200_df(start_date, end_date)
-        return cached_results
+        return self._get_cached_http200_df(start_date, end_date)
 
     def _get_cached_http200_df(self, start_date, end_date):
         df_list = []
@@ -93,15 +89,14 @@ class DataDogSource:
                 df_list.append(new_df)
                 print("Read {}".format(s3_human_path))
             except Exception:
-                # If any data is missing, just return None and just
-                # recompute the entire day of data
-                return None
+                # If any data is missing, just skip ahead
+                continue
 
             sdate = sdate + timedelta(days=1)
 
         return unionAll(*df_list)
 
-    def _write_http200(self, minutes=15 * 24 * 60):
+    def write_http200(self, minutes=15 * 24 * 60):
         cmd = "sum"
         metric = "aws.elb.httpcode_backend_2xx"
         tags = "{app:data,stack:taar,env:prod}"
@@ -160,11 +155,7 @@ class DataDogSource:
         end_date = date.today() - timedelta(days=1)
         start_date = end_date - timedelta(days=14)
 
-        cached_results = self._get_cached_dynamo_df(start_date, end_date)
-        if cached_results is None:
-            self._write_dynamo_read_latency()
-            cached_results = self._get_cached_dynamo_df(start_date, end_date)
-        return cached_results
+        return self._get_cached_dynamo_df(start_date, end_date)
 
     def _get_cached_dynamo_df(self, start_date, end_date):
 
@@ -183,15 +174,14 @@ class DataDogSource:
                 df_list.append(new_df)
                 print("Read {}".format(s3_human_path))
             except Exception:
-                # If any data is missing, just return None and just
-                # recompute the entire day of data
-                return None
+                # If any data is missing, just skip ahead
+                continue
 
             sdate = sdate + timedelta(days=1)
 
         return unionAll(*df_list)
 
-    def _write_dynamo_read_latency(self, minutes=15 * 24 * 60):
+    def write_dynamo_read_latency(self, minutes=15 * 24 * 60):
         """
         Return a list of 2-tuples of (timestamps, latency in ms)
         """
