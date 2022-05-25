@@ -90,7 +90,7 @@ py4j==0.10.7
 pyarrow==0.14.1
 pyasn1==0.4.5
 Pygments==2.4.2
-PyJWT==1.7.1
+PyJWT==2.4.0
 pyparsing==2.4.1
 pyrsistent==0.15.3
 pyspark==2.4.3
