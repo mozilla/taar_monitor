@@ -61,7 +61,7 @@ kiwisolver==1.1.0
 koalas==0.13.0
 lazy-object-proxy==1.4.1
 lockfile==0.12.2
-Mako==1.1.0
+Mako==1.2.2
 Markdown==2.6.11
 MarkupSafe==1.1.1
 marshmallow==2.19.5
