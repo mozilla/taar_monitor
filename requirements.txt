@@ -42,7 +42,7 @@ future==0.16.0
 gunicorn==19.9.0
 idna==2.8
 ipykernel==5.1.1
-ipython==7.6.1
+ipython==8.10.0
 ipython-genutils==0.2.0
 ipywidgets==7.5.0
 iso8601==0.1.12
